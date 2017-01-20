@@ -1,43 +1,115 @@
+const Actions = {
+  ADD_ITEM: 'ADD_ITEM',
+};
+
+const ActionCreator = {
+
+  addItem: label => ({
+    type: Actions.ADD_ITEM,
+    label
+  })
+};
+
 (async () => {
 
   window.module = {};
 
   const registry = new Map();
 
-  let lastVirtualDOM = null;
+  let currentVirtualDOM;
+  let rootElement;
+  let rootComponent;
 
   const getScriptPath = componentPath => '/' + componentPath + '.js';
+
+  let setState;
+
+  const createStore = async () => {
+
+    let currentState = {};
+    setState = state => currentState = state;
+
+    currentState.items = ['bookmarks', 'news', 'extensions', 'tabs', 'settings'];
+
+    return {
+      getState: () => currentState,
+    };
+  };
+
+  let store;
+
+  const reducer = (state = currentState, action) => {
+
+    if (action.type === Actions.ADD_ITEM) {
+       const nextState = Object.assign({}, state);
+       nextState.items = [...state.items];
+       for (let i = 0; i < 1000; i++) {
+         nextState.items.push(action.label);
+       }
+       return nextState;
+    }
+
+    console.warn('Returning the same state');
+    return state;
+  };
+
+  const dispatch = action => {
+    const nextState = reducer(store.getState(), action);
+    setState(nextState);
+    Reactor.update();
+  };
 
   window.Reactor = {
 
     instantiate: async (def) => {
       const componentPath = typeof def === 'symbol' ? registry.get(def) : def;
-      const ComponentClass = await require(componentPath);
-      const component = new ComponentClass();
-      await component.init();
-      return component;
+
+      let componentClass = registry.get(componentPath);
+      if (componentClass) {
+        return new componentClass();
+      }
+      
+      componentClass = await require(componentPath);
+      return new componentClass();
     },
 
-    render: async (definition, rootElement) => {
-      console.log('Rendering in:', rootElement);
+    render: async (definition, containerElement) => {
+
+      rootElement = containerElement;
+      store = await createStore();
+
+      console.log('Rendering in:', containerElement);
       if (typeof definition === 'symbol') {
         const componentPath = registry.get(definition);
         console.log('(reactor) Loading component:', componentPath);
  
         const component = await Reactor.instantiate(componentPath);
+        rootComponent = component;
+
+        // init component with properties
+        component.props = store.getState();
+        component.dispatch = dispatch;
 
         const virtualDOM = await VirtualDOM.resolve(component);
         console.log('(reactor) Virtual DOM:', virtualDOM);
 
-        const virtualDiff = VirtualDOM.calculateDiff(lastVirtualDOM, virtualDOM);
+        Renderer.renderInElement(containerElement, virtualDOM);
 
-        const element = Renderer.renderInElement(rootElement, virtualDiff);
-
-        lastVirtualDOM = virtualDOM;
-        
-      } else if (typeof component === 'function') {
-        
+        currentVirtualDOM = virtualDOM;
       }
+    },
+
+    // TODO: is it needed?
+    update: async () => {
+      
+      rootComponent.props = store.getState();
+      const virtualDOM = await VirtualDOM.resolve(rootComponent);
+      console.timeEnd('update');
+
+      console.time('render');
+      Renderer.renderInElement(rootElement, virtualDOM);
+      currentVirtualDOM = virtualDOM;
+      console.timeEnd('render');
     },
 
     Component: class  Component{
@@ -47,17 +119,10 @@
     }
   };
 
-//   window.define = component => {
-//     // console.log('Defining:', component);
-//     pendingDefinition = component;
-//     // console.log('Defined:', component);
-//     // window.registry.set(/* ??? */ path, exported)
-//   };
-
   window.require = componentPath => {
 
     if (registry.get(componentPath)) {
-      console.log(`(loader) Loaded component "${componentPath}" from cache`);
+      // console.log(`(loader) Loaded component "${componentPath}" from cache`);
       return Promise.resolve(registry.get(componentPath));
     }
 
@@ -70,7 +135,14 @@
         registry.set(componentPath, module.exports);
         console.log('(loader) Loaded script:', script.src);
         console.timeEnd('=> script load time');
-        resolve(module.exports);
+        if (module.exports) {
+          const componentClass = module.exports;
+          if (componentClass.prototype instanceof Reactor.Component) {
+            componentClass.init().then(() => {
+              resolve(module.exports);
+            });
+          }
+        }
       };
       document.head.appendChild(script);
     });

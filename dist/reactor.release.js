@@ -1817,51 +1817,6 @@
     }
   };
 
-  const areCompatible = (current, next) => {
-    if (current.nodeType !== next.nodeType) {
-      return false;
-    }
-    if (current.isComponent()) {
-      return current.constructor === next.constructor;
-    }
-    if (current.isElement()) {
-      return current.name === next.name;
-    }
-  };
-
-  const elementPatches = (current, next, patches) => {
-    attributePatches(current.attrs, next.attrs, current, patches);
-    datasetPatches(current.dataset, next.dataset, current, patches);
-    stylePatches(current.style, next.style, current, patches);
-    classNamePatches(current.classNames, next.classNames, current, patches);
-    listenerPatches(current.listeners, next.listeners, current, patches);
-    childrenPatches(current.children, next.children, current, patches);
-  };
-
-  const reconcileNode = (current, next, parent, index, patches) => {
-
-    if (current === next) {
-      // already inserted
-      return;
-    }
-    if (areCompatible(current, next)) {
-      if (current.isElement()) {
-        elementPatches(current, next, patches);
-      }
-      if (current.isComponent()) {
-        if (!Diff.deepEqual(current.props, next.props)) {
-          patches.push(Reactor.Patch.updateComponent(current, next.props));
-          calculatePatches(current.child, next.child, current, patches);
-        } else {
-          // no patch needed
-        }
-      }
-    } else {
-      patches.push(Reactor.Patch.removeChildNode(current, index, parent));
-      patches.push(Reactor.Patch.insertChildNode(next, index, parent));
-    }
-  };
-
   const childrenPatches = (current = [], next = [], parent, patches) => {
 
     const Patch = Reactor.Patch;
@@ -1902,6 +1857,57 @@
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
       reconcileNode(child, next[i], parent, i, patches);
+    }
+  };
+
+  const elementPatches = (current, next, patches) => {
+    attributePatches(current.attrs, next.attrs, current, patches);
+    datasetPatches(current.dataset, next.dataset, current, patches);
+    stylePatches(current.style, next.style, current, patches);
+    classNamePatches(current.classNames, next.classNames, current, patches);
+    listenerPatches(current.listeners, next.listeners, current, patches);
+    if (current.text !== null && next.text === null) {
+      patches.push(Reactor.Patch.removeTextContent(current));
+    }
+    childrenPatches(current.children, next.children, current, patches);
+    if (next.text !== null && current.text !== next.text) {
+      patches.push(Reactor.Patch.setTextContent(current, next.text));
+    }
+  };
+
+  const reconcileNode = (current, next, parent, index, patches) => {
+
+    if (current === next) {
+      // already inserted
+      return;
+    }
+    if (areCompatible(current, next)) {
+      if (current.isElement()) {
+        elementPatches(current, next, patches);
+      }
+      if (current.isComponent()) {
+        if (!Diff.deepEqual(current.props, next.props)) {
+          patches.push(Reactor.Patch.updateComponent(current, next.props));
+          calculatePatches(current.child, next.child, current, patches);
+        } else {
+          // no patch needed
+        }
+      }
+    } else {
+      patches.push(Reactor.Patch.removeChildNode(current, index, parent));
+      patches.push(Reactor.Patch.insertChildNode(next, index, parent));
+    }
+  };
+
+  const areCompatible = (current, next) => {
+    if (current.nodeType !== next.nodeType) {
+      return false;
+    }
+    if (current.isComponent()) {
+      return current.constructor === next.constructor;
+    }
+    if (current.isElement()) {
+      return current.name === next.name;
     }
   };
 
@@ -2021,6 +2027,7 @@
   loader.define('core/diff', Diff);
 }
 
+
 {
   const Type = Object.freeze({
 
@@ -2055,6 +2062,9 @@
     INSERT_CHILD_NODE: Symbol('insert-child-node'),
     MOVE_CHILD_NODE: Symbol('move-child-node'),
     REMOVE_CHILD_NODE: Symbol('remove-child-node'),
+
+    SET_TEXT_CONTENT: Symbol('set-text-content'),
+    REMOVE_TEXT_CONTENT: Symbol('remove-text-content'),
   });
 
   const Patch = class {
@@ -2352,6 +2362,27 @@
       });
     }
 
+    static setTextContent(element, text) {
+      return new Patch(Type.SET_TEXT_CONTENT, {
+        element,
+        text,
+        apply: () => {
+          element.text = text;
+          Reactor.Document.setTextContent(element.ref, text);
+        }
+      });
+    }
+
+    static removeTextContent(element) {
+      return new Patch(Type.REMOVE_TEXT_CONTENT, {
+        element,
+        apply: () => {
+          element.text = null;
+          Reactor.Document.setTextContent(element.ref, '');
+        }
+      });
+    }
+
     static get Type() {
       return Object.assign({}, Type);
     }
@@ -2359,7 +2390,6 @@
 
   loader.define('core/patch', Patch);
 }
-
 
 {
   const Name = {

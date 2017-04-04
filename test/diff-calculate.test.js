@@ -41,7 +41,7 @@ describe('Diff => calculate patches', () => {
     const createTrees = (...templates) => {
       let currentTemplate;
       return templates.map(
-          template => ComponentTree.createFromTemplate(template));
+        template => ComponentTree.createFromTemplate(template));
     };
 
     it('adds an attribute', () => {
@@ -306,8 +306,7 @@ describe('Diff => calculate patches', () => {
         },
       ];
       const nextTemplate = [
-        'div', {
-        },
+        'div', {},
       ];
 
       // when
@@ -440,7 +439,9 @@ describe('Diff => calculate patches', () => {
         assert.equal(patch.props, props);
       };
 
-      const createChildren = ({keys}) => ({
+      const createChildren = ({
+        keys
+      }) => ({
         from: (...items) => items.map(name => [
           name, {
             key: (keys === true ? name : undefined)
@@ -980,6 +981,123 @@ describe('Diff => calculate patches', () => {
         });
       });
     });
+
+    describe('set text content', () => {
+
+      it('sets text on an empty element', () => {
+
+        const template = [
+          'section'
+        ];
+
+        const nextTemplate = [
+          'section', 'some text',
+        ];
+
+        // when
+        const [tree, nextTree] = createTrees(template, nextTemplate);
+        const patches = Diff.calculate(tree, nextTree);
+
+        assert.equal(patches.length, 1);
+        assert.equal(patches[0].type, Patch.Type.SET_TEXT_CONTENT);
+        assert.equal(patches[0].text, 'some text');
+      });
+
+      it('replaces existing text content', () => {
+
+        const template = [
+          'section', 'some text',
+        ];
+
+        const nextTemplate = [
+          'section', 'another text',
+        ];
+
+        // when
+        const [tree, nextTree] = createTrees(template, nextTemplate);
+        const patches = Diff.calculate(tree, nextTree);
+
+        assert.equal(patches.length, 1);
+        assert.equal(patches[0].type, Patch.Type.SET_TEXT_CONTENT);
+        assert.equal(patches[0].text, 'another text');
+      });
+
+      it('replaces existing child nodes', () => {
+
+        const template = [
+          'section', [
+            'div'
+          ]
+        ];
+
+        const nextTemplate = [
+          'section', 'some text',
+        ];
+
+        // when
+        const [tree, nextTree] = createTrees(template, nextTemplate);
+        const patches = Diff.calculate(tree, nextTree);
+
+        assert.equal(patches.length, 2);
+
+        assert.equal(patches[0].type, Patch.Type.REMOVE_CHILD_NODE);
+        assert.equal(patches[0].parent, tree);
+        assert.equal(patches[0].at, 0);
+        assert.equal(patches[0].node, tree.children[0]);
+
+        assert.equal(patches[1].type, Patch.Type.SET_TEXT_CONTENT);
+        assert.equal(patches[1].text, 'some text');
+      });
+    });
+
+    describe('remove text content', () => {
+
+      it('removes existing text content', () => {
+
+        const template = [
+          'section', 'some text',
+        ];
+
+        const nextTemplate = [
+          'section',
+        ];
+
+        // when
+        const [tree, nextTree] = createTrees(template, nextTemplate);
+        const patches = Diff.calculate(tree, nextTree);
+
+        console.log(patches);
+
+        assert.equal(patches.length, 1);
+        assert.equal(patches[0].type, Patch.Type.REMOVE_TEXT_CONTENT);
+      });
+
+      it('removes text content before appending child nodes', () => {
+
+        const template = [
+          'section', 'some text',
+        ];
+
+        const nextTemplate = [
+          'section', [
+            'div'
+          ]
+        ];
+
+        // when
+        const [tree, nextTree] = createTrees(template, nextTemplate);
+        const patches = Diff.calculate(tree, nextTree);
+
+        assert.equal(patches.length, 2);
+
+        assert.equal(patches[0].type, Patch.Type.REMOVE_TEXT_CONTENT);
+
+        assert.equal(patches[1].type, Patch.Type.INSERT_CHILD_NODE);
+        assert.equal(patches[1].parent, tree);
+        assert.equal(patches[1].at, 0);
+        assert.equal(patches[1].node, nextTree.children[0]);
+      });
+    });
   });
 
   describe('=> on a Component', () => {
@@ -1007,9 +1125,11 @@ describe('Diff => calculate patches', () => {
       const props = {};
       const children = [];
 
-      const nextProps = { child: true };
+      const nextProps = {
+        child: true
+      };
       const nextChildren = [
-        [ 'div' ]
+        ['div']
       ];
 
       // when
@@ -1035,9 +1155,11 @@ describe('Diff => calculate patches', () => {
     it('removes an element', () => {
 
       // given
-      const props = { child: true };
+      const props = {
+        child: true
+      };
       const children = [
-        [ 'div' ]
+        ['div']
       ];
 
       const nextProps = {};
@@ -1060,7 +1182,7 @@ describe('Diff => calculate patches', () => {
       assert(patches[1].parent.isComponent());
       assert.equal(patches[1].parent, component);
       assert(patches[1].element.isElement());
-      assert.equal(patches[1].element.name, 'div');      
+      assert.equal(patches[1].element.name, 'div');
     });
 
     it('adds a component', () => {
@@ -1069,9 +1191,11 @@ describe('Diff => calculate patches', () => {
       const props = {};
       const children = [];
 
-      const nextProps = { child: true };
+      const nextProps = {
+        child: true
+      };
       const nextChildren = [
-        [ Subcomponent ]
+        [Subcomponent]
       ];
 
       // when
@@ -1097,9 +1221,11 @@ describe('Diff => calculate patches', () => {
     it('removes a component', () => {
 
       // given
-      const props = { child: true };
+      const props = {
+        child: true
+      };
       const children = [
-        [ Subcomponent ]
+        [Subcomponent]
       ];
 
       const nextProps = {};
@@ -1122,7 +1248,7 @@ describe('Diff => calculate patches', () => {
       assert(patches[1].parent.isComponent());
       assert.equal(patches[1].parent, component);
       assert(patches[1].component.isComponent());
-      assert.equal(patches[1].component.constructor, SubcomponentClass);      
+      assert.equal(patches[1].component.constructor, SubcomponentClass);
     });
 
     describe('replaces a child element', () => {
@@ -1130,14 +1256,18 @@ describe('Diff => calculate patches', () => {
       it('with an element', () => {
 
         // given
-        const props = { child: 'div' };
+        const props = {
+          child: 'div'
+        };
         const children = [
-          [ 'div' ]
+          ['div']
         ];
 
-        const nextProps = { child: 'span' };
+        const nextProps = {
+          child: 'span'
+        };
         const nextChildren = [
-          [ 'span' ]
+          ['span']
         ];
 
         // when
@@ -1169,14 +1299,18 @@ describe('Diff => calculate patches', () => {
       it('with a component', () => {
 
         // given
-        const props = { child: 'div' };
+        const props = {
+          child: 'div'
+        };
         const children = [
-          [ 'div' ]
+          ['div']
         ];
 
-        const nextProps = { child: 'component' };
+        const nextProps = {
+          child: 'component'
+        };
         const nextChildren = [
-          [ Subcomponent ]
+          [Subcomponent]
         ];
 
         // when
@@ -1206,20 +1340,24 @@ describe('Diff => calculate patches', () => {
       });
 
     });
-    
+
     describe('replaces a child component', () => {
-      
+
       it('with an element', () => {
 
         // given
-        const props = { child: 'subcomponent' };
+        const props = {
+          child: 'subcomponent'
+        };
         const children = [
-          [ Subcomponent ]
+          [Subcomponent]
         ];
 
-        const nextProps = { child: 'div' };
+        const nextProps = {
+          child: 'div'
+        };
         const nextChildren = [
-          [ 'div' ]
+          ['div']
         ];
 
         // when
@@ -1251,14 +1389,18 @@ describe('Diff => calculate patches', () => {
       it('with a component', () => {
 
         // given
-        const props = { child: 'subcomponent' };
+        const props = {
+          child: 'subcomponent'
+        };
         const children = [
-          [ Subcomponent ]
+          [Subcomponent]
         ];
 
-        const nextProps = { child: 'other-component' };
+        const nextProps = {
+          child: 'other-component'
+        };
         const nextChildren = [
-          [ OtherComponent ]
+          [OtherComponent]
         ];
 
         // when

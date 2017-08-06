@@ -52,15 +52,19 @@
       return this;
     };
 
-    static symbol(path, ctx = context) {
+    static symbol(path) {
       const symbol = Symbol.for(path);
-      let moduleSymbols = dependencySymbols.get(ctx);
+      let moduleSymbols = dependencySymbols.get(context);
       if (!moduleSymbols) {
         moduleSymbols = [];
-        dependencySymbols.set(ctx, moduleSymbols);
+        dependencySymbols.set(context, moduleSymbols);
       }
       moduleSymbols.push(symbol);
       return symbol;
+    }
+
+    static setContext(currentContext) {
+      context = currentContext;
     }
 
     static define(path, module) {
@@ -797,9 +801,17 @@
 }
 
 {
+  const ID = Symbol('id');
+  const CONTEXT = Symbol('context');
+
   const VirtualNode = class {
 
+    get id() {
+      return this[ID];
+    }
+
     constructor() {
+      this[ID] = Reactor.utils.createUUID();
       this.parentNode = null;
     }
 
@@ -826,14 +838,37 @@
     isComment() {
       return this instanceof Comment;
     }
+
+    findDescendant(nodeId) {
+      return null;
+    }
+
+    findNode(nodeId) {
+      if (this.id === nodeId) {
+        return this;
+      }
+      return this.findDescendant(nodeId);
+    }
   };
 
   const Component = class extends VirtualNode {
 
     constructor() {
       super();
+      this[CONTEXT] = this.createContext();
       this.child = null;
       this.comment = new Comment(this.constructor.name, this);
+    }
+
+    createContext() {
+      const context = {};
+      context.render = this.render.bind(context);
+      context.render.bound = true;
+      return context;
+    }
+
+    get context() {
+      return this[CONTEXT];
     }
 
     appendChild(child) {
@@ -887,6 +922,10 @@
     onDestroyed() {}
 
     onDetached() {}
+
+    findDescendant(nodeId) {
+      return this.child.findNode(nodeId);
+    }
 
     get nodeType() {
       return 'component';
@@ -998,6 +1037,16 @@
       this.children.splice(to, 0, child);
     }
 
+    findDescendant(nodeId) {
+      for (const child of this.children) {
+        const node = child.findNode(nodeId);
+        if (node) {
+          return node;
+        }
+      }
+      return null;
+    }
+
     get nodeType() {
       return 'element';
     }
@@ -1033,12 +1082,19 @@
 }
 
 {
+  const ID = Symbol('id');
+
   const App = class {
 
     constructor(path) {
+      this[ID] = Reactor.utils.createUUID();
       this.path = path;
       this.preloaded = false;
       this.store = new Reactor.Store();
+    }
+
+    get id() {
+      return this[ID];
     }
 
     async preload() {
@@ -1065,6 +1121,12 @@
         this.reducer.commands.init(this.root.getInitialState()));
     }
 
+    async reload() {
+      // TODO: this is evil!
+      this.root.props.reload = Math.random();
+      this.updateDOM();
+    }
+
     calculatePatches() {
       const patches = [];
       if (!Reactor.Diff.deepEqual(this.store.state, this.root.props)) {
@@ -1082,13 +1144,18 @@
     }
 
     async updateDOM() {
-      console.time('=> Render');
+      if (Reactor.debug) {
+        console.time('=> Render');
+      }
       const patches = this.calculatePatches();
       Reactor.ComponentLifecycle.beforeUpdate(patches);
       for (const patch of patches) patch.apply();
+      Reactor.__devtools_hook__.publishUpdate(this)
       Reactor.ComponentLifecycle.afterUpdate(patches);
-      console.log('Patches:', patches.length);
-      console.timeEnd('=> Render');
+      if (Reactor.debug) {
+        console.log('Patches:', patches.length);
+        console.timeEnd('=> Render');
+      }
     }
   };
 
@@ -1491,10 +1558,9 @@
     }
 
     static createChildTree(root, props) {
-      const template = root.render.call({
-        props,
-        dispatch: root.dispatch,
-      });
+      root.context.props = props;
+      root.context.dispatch = root.dispatch;
+      const template = root.context.render();
       const tree = this.createFromTemplate(template);
       if (tree) {
         tree.parentNode = root;
@@ -1507,10 +1573,9 @@
       try {
         const instance = this.createComponentInstance(symbol);
         instance.props = props;
-        const template = instance.render.call({
-          props,
-          children
-        });
+        instance.context.props = props;
+        instance.context.children = children;
+        const template = instance.context.render();
         if (template) {
           // TODO: handle undefined, false, null
           instance.appendChild(this.createFromTemplate(template));
@@ -1553,6 +1618,7 @@
 
     static onNodeCreated(node) {
       switch (node.nodeType) {
+        case 'root':
         case 'component':
           return this.onComponentCreated(node);
         case 'element':
@@ -1577,6 +1643,7 @@
 
     static onNodeAttached(node) {
       switch (node.nodeType) {
+        case 'root':
         case 'component':
           return this.onComponentAttached(node);
         case 'element':
@@ -1609,6 +1676,7 @@
 
     static onNodeDestroyed(node) {
       switch (node.nodeType) {
+        case 'root':
         case 'component':
           return this.onComponentDestroyed(node);
         case 'element':
@@ -1633,6 +1701,7 @@
 
     static onNodeDetached(node) {
       switch (node.nodeType) {
+        case 'root':
         case 'component':
           return this.onComponentDetached(node);
         case 'element':
@@ -2681,6 +2750,160 @@
   loader.define('core/utils', Utils);
 }
 
+{
+  const apps = new Map();
+
+  const DevToolsHook = class {
+
+    static publishUpdate(app) {
+      setTimeout(() => {
+        window.postMessage({
+          source: 'Reactor',
+          type: 'update-app',
+          data:  {
+            appId: app.id,
+          },
+        }, '*');
+      });
+    }
+
+    static describeApp(app) {
+      return {
+        name: app.root.constructor.name,
+        id: app.id,
+        path: app.path.toString().slice(7, -1),
+      }
+    }
+
+    static describeProps(props) {
+      return props;
+    }
+
+    static getPath(component) {
+      const loaderEntry = loader.debug_.getModules()
+        .find(([path, module]) => module === component.constructor);
+      return location.href + loaderEntry[0] + '.js';
+    }
+
+    static describeComponent(component) {
+      const description = {
+        id: component.id,
+        type: 'component',
+        name: component.constructor.name,
+        path: this.getPath(component),
+        props: this.describeProps(component.props),
+      };
+      if (component.child) {
+        description.children = [this.describeNode(component.child)];
+      }
+      return description;
+    }
+
+    static describeElement(element) {
+      const description = {
+        id: element.id,
+        type: 'element',
+        name: element.name,
+        classNames: element.classNames,
+      }
+      if (element.children.length) {
+        description.children = element.children.map(
+          node => this.describeNode(node));
+      }
+      if (element.text) {
+        description.text = element.text;
+      }
+      return description;
+    }
+
+    static describeNode(node) {
+      if (node.isComponent()) {
+        return this.describeComponent(node);
+      }
+      if (node.isElement()) {
+        return this.describeElement(node);
+      }
+      return null;
+    }
+
+    static registerApp(app) {
+      apps.set(app.id, app);
+    }
+
+    static getApps() {
+      return Array.from(apps.values()).map(app => this.describeApp(app));
+    }
+
+    static getApp(appId) {
+      const app = apps.get(appId);
+      if (app) {
+        return this.describeNode(app.root);
+      }
+      return null;
+    }
+
+    static getBoundingRect(appId, nodeId) {
+      const element = this.getElement(appId, nodeId);
+      const rect = element.getBoundingClientRect();
+      return {
+        top: rect.top,
+        left: rect.left,
+        height: rect.height,
+        width: rect.width,
+      };
+    }
+
+    static getElement(appId, nodeId) {
+      const app = apps.get(appId);
+      if (app) {
+        if (nodeId) {
+          const node = app.root.findNode(nodeId);
+          if (node.isElement()) {
+            return node.ref;
+          }
+          if (node.isComponent()) {
+            return node.childElement.ref;
+          }
+          return null;
+        }
+        return app.root.parentElement.ref;
+      }
+    }
+
+    static getComponent(appId, nodeId) {
+      const app = apps.get(appId);
+      if (app) {
+        const node = app.root.findNode(nodeId);
+        if (node && node.isComponent()) {
+          return node;
+        }
+      }
+      return null;
+    }
+
+    static getComponentName(appId, nodeId) {
+      const component = this.getComponent(appId, nodeId);
+      if (component) {
+        return component.constructor.name;
+      }
+    }
+
+    static getRenderFunction(appId, nodeId) {
+      const component = this.getComponent(appId, nodeId);
+      if (component) {
+        return component.context.render;
+      }
+    }
+
+    static reloadApps() {
+      for (const app of Array.from(apps.values())) {
+        app.reload();
+      }
+    }
+  };
+
+  loader.define('core/devtools-hook', DevToolsHook);
+}
 
 {
   loader.prefix('core', '/src/');
@@ -2706,7 +2929,13 @@
   const Reconciler = loader.get('core/reconciler');
   const Document = loader.get('core/document');
   const utils = loader.get('core/utils');
-  const create = root => new App(root);
+  const DevToolsHook = loader.get('core/devtools-hook');
+
+  const create = root => {
+    const app = new App(root);
+    DevToolsHook.registerApp(app);
+    return app;
+  };
 
   const Reactor = {
     // constants
@@ -2719,6 +2948,8 @@
     VirtualNode, Root, Component, VirtualElement, Comment,
     // utils
     utils, create,
+    // devtools
+    __devtools_hook__: DevToolsHook,
 
     debug: false,
     ready: () => Promise.resolve(),

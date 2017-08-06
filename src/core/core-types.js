@@ -1,7 +1,15 @@
 {
+  const ID = Symbol('id');
+  const CONTEXT = Symbol('context');
+
   const VirtualNode = class {
 
+    get id() {
+      return this[ID];
+    }
+
     constructor() {
+      this[ID] = Reactor.utils.createUUID();
       this.parentNode = null;
     }
 
@@ -28,14 +36,37 @@
     isComment() {
       return this instanceof Comment;
     }
+
+    findDescendant(nodeId) {
+      return null;
+    }
+
+    findNode(nodeId) {
+      if (this.id === nodeId) {
+        return this;
+      }
+      return this.findDescendant(nodeId);
+    }
   };
 
   const Component = class extends VirtualNode {
 
     constructor() {
       super();
+      this[CONTEXT] = this.createContext();
       this.child = null;
       this.comment = new Comment(this.constructor.name, this);
+    }
+
+    createContext() {
+      const context = {};
+      context.render = this.render.bind(context);
+      context.render.bound = true;
+      return context;
+    }
+
+    get context() {
+      return this[CONTEXT];
     }
 
     appendChild(child) {
@@ -89,6 +120,10 @@
     onDestroyed() {}
 
     onDetached() {}
+
+    findDescendant(nodeId) {
+      return this.child.findNode(nodeId);
+    }
 
     get nodeType() {
       return 'component';
@@ -198,6 +233,16 @@
       console.assert(this.children[from] === child);
       this.children.splice(from, 1);
       this.children.splice(to, 0, child);
+    }
+
+    findDescendant(nodeId) {
+      for (const child of this.children) {
+        const node = child.findNode(nodeId);
+        if (node) {
+          return node;
+        }
+      }
+      return null;
     }
 
     get nodeType() {
